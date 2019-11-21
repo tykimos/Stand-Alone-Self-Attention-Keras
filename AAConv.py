@@ -32,9 +32,11 @@ class AugmentedConv(nn.Module):
 
         self.qkv_conv = nn.Conv2d(self.in_channels, 2 * self.dk + self.dv, kernel_size=self.kernel_size, stride=stride, padding=self.padding)
         # attnetion을 위한 컨볼루션 레이어입니다. 여기서 self.dk 앞에 곱하기 2를 해준 건 k와 q의 채널 수가 동일하기 때문입니다.
+        # 출력은 그럼 dk dq dv 이렇게 나옴
 
         self.attn_out = nn.Conv2d(self.dv, self.dv, kernel_size=1, stride=1)
         # attention의 마지막 출력을 위한 convolution입니다.
+        # 입출력 채널이 동일하고, kernel size가 1이면, 출력 채널 즉 dv만큼 커널 하나짜리 웨이트가 있음
 
         if self.relative:  # SASA와 비슷하게 상대위치에 대한 정보를 인코딩합니다.
             self.key_rel_w = nn.Parameter(torch.randn((2 * self.shape - 1, dk // Nh), requires_grad=True))
@@ -48,13 +50,16 @@ class AugmentedConv(nn.Module):
         # conv_out
         # (batch_size, out_channels, height, width)
         conv_out = self.conv_out(x)  # 일반적인 convolution입니다. 마지막 부분에 attention의 출력과 concat하기 위함입니다.
+        # 출력 채널은 self.out_channels - self.dv으로 나옴
         batch, _, height, width = conv_out.size()
+        # 사이즈는 batch, channel, height, width로 나옴
 
         # flat_q, flat_k, flat_v
         # (batch_size, Nh, height * width, dvh or dkh)
-        # dvh = dv / Nh, dkh = dk / Nh
+        # dvh = dv / Nh, dkh = dk / Nh # 채널을 헤더로 나눠서 나오는 것입니다. 
         # q, k, v
-        # (batch_size, Nh, height, width, dv or dk)
+        # (batch_size, Nh, height, width, dv or dk) 가 아니고
+        # (batch_size, Nh, height, width, dv or dk) 임
         flat_q, flat_k, flat_v, q, k, v = self.compute_flat_qkv(x, self.dk, self.dv, self.Nh)  # 인풋을 q, k, v,로 나누는데요,
         # 이때 H와 W dimension을 하나로 합치기 때문에 flat이란 말이 붙었습니다. 즉 HxW 부분을 H*W 로 하나의 차원에 몰아넣는 것이죠.
 
@@ -90,9 +95,9 @@ class AugmentedConv(nn.Module):
         dkh = dk // Nh
         q *= dkh ** -0.5  # 이 부분은 query를 normalize해주는 부분인데요, 왜 굳이 이 값으로 해주는지는 좀 더 알아봐야 하겠습니다. Normalize가 필요한 이유는, dkh가 클수록 q값도 커지기 때문에 이를 방지하기 위한 수단으로 나눠주는 것입니다.
         flat_q = torch.reshape(q, (N, Nh, dk // Nh, H * W))  # H와 W를 하나의 차원에 몰아넣습니다.
-        flat_k = torch.reshape(k, (N, Nh, dk // Nh, H * W))
-        flat_v = torch.reshape(v, (N, Nh, dv // Nh, H * W))
-        return flat_q, flat_k, flat_v, q, k, v
+        flat_k = torch.reshape(k, (N, Nh, dk // Nh, H * W)) 
+        flat_v = torch.reshape(v, (N, Nh, dv // Nh, H * W)) # 샘플 수, 헤드 수, 피처, 높이 * 너비 (높이와 너비가 다른 걸, 둘이 곱해서, 플랫이라고 함)
+        return flat_q, flat_k, flat_v, q, k, v # 플랫과, 플랫 전 피처를 반환합니다.
 
     def split_heads_2d(self, x, Nh): # 피쳐맵의 차원을 변경하여 head의 차원을 포함하게 만들어줍니다.
         batch, channels, height, width = x.size()  # 피쳐맵의 원래 차원인 B x C x H x W
